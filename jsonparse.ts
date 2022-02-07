@@ -464,3 +464,24 @@ export default class JSONStreamParser {
     }
   }
 }
+
+
+export class JsonTransformStream extends TransformStream {
+    private parser: JSONStreamParser;
+    constructor() {
+      super({
+        start: (controller) => {
+          this.parser.onValue = (val) => {
+            if (typeof val === "object" && !Array.isArray(val)) {
+              controller.enqueue(val);
+            }
+          }
+        },
+        transform: async (chunk) => {
+          chunk = await chunk;
+          this.parser.write(chunk);
+        }
+      });
+      this.parser = new JSONStreamParser();
+    }
+}
