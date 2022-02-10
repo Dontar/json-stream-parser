@@ -11,7 +11,9 @@ json.onValue = (val, stack) => {
     const current = stack[last];
     if (parent && typeof parent.key === "string") {
       result = { [parent.key]: current.mode === ParserMode.ARRAY ? [val] : val };
-    } else if (typeof current.key === "string" && typeof val !== "object") {
+    } else if (typeof current.key === "number") {
+      result = [val];
+    } else if (typeof current.key === "string" && typeof val !== "object" && stack.length === 2) {
       result = { [current.key]: current.mode === ParserMode.ARRAY ? [val] : val };
     }
     //  else {

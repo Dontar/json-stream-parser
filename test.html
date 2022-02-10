@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+<body>
+    <form>
+        <fieldset id="alabala">
+            <legend>Choose your favorite monster</legend>
+
+            <input type="radio" id="kraken" name="monster">
+            <label for="kraken">Kraken</label><br />
+
+            <input type="radio" id="sasquatch" name="monster">
+            <label for="sasquatch">Sasquatch</label><br />
+
+            <input type="radio" id="mothman" name="monster">
+            <label for="mothman">Mothman</label>
+        </fieldset>
+    </form>
+    <script type="text/javascript">
+        /** @type {HTMLFieldSetElement} */
+        const field = document.querySelector("#alabala");
+        field.onclick = (e) => {
+            console.log(e.target.id, e.target.value);
+            console.log(e.currentTarget.id, e.currentTarget.value);
+        }
+    </script>
+</body>
+
+</html>
