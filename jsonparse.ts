@@ -1,5 +1,5 @@
 // Named constants with unique integer values
-enum C {
+enum ParserState {
   LEFT_BRACE = 0x1,
   RIGHT_BRACE = 0x2,
   LEFT_BRACKET = 0x3,
@@ -11,7 +11,12 @@ enum C {
   NULL = 0x9,
   STRING = 0xa,
   NUMBER = 0xb,
-  // Tokenizer States
+  VALUE = 0x71,
+  KEY = 0x72,
+}
+
+// Tokenizer States
+enum TokenizerState {
   START = 0x11,
   STOP = 0x12,
   TRUE1 = 0x21,
@@ -32,13 +37,18 @@ enum C {
   STRING4 = 0x64,
   STRING5 = 0x65,
   STRING6 = 0x66,
-  // Parser States
-  VALUE = 0x71,
-  KEY = 0x72,
-  // Parser Modes
+
+}
+
+
+// Parser Modes
+export enum ParserMode {
   OBJECT = 0x81,
   ARRAY = 0x82,
-  // Character constants
+}
+
+// Character constants
+enum CharacterConstant {
   BACK_SLASH = "\\".charCodeAt(0),
   FORWARD_SLASH = "\/".charCodeAt(0),
   BACKSPACE = "\b".charCodeAt(0),
@@ -47,22 +57,23 @@ enum C {
   CARRIAGE_RETURN = "\r".charCodeAt(0),
   TAB = "\t".charCodeAt(0),
 
-  STRING_BUFFER_SIZE = 64 * 1024
 }
+const STRING_BUFFER_SIZE = 64 * 1024
 
+export type Stack = { value: unknown, key?: string | number, mode?: ParserMode };
 
 export default class JSONStreamParser {
-  private tState: number;
+  private tState: TokenizerState;
   private value: any;
   private string?: string;
   private stringBuffer: Uint8Array;
   private stringBufferOffset: number;
   private unicode?: string;
   private highSurrogate?: number;
-  private key?: any;
-  private mode: C | undefined;
-  private stack: { value: unknown, key: string, mode: C }[];
-  private state: number;
+  private key?: string | number;
+  private mode: ParserMode | undefined;
+  private stack: Stack[];
+  private state: ParserState;
   private bytes_remaining: number;
   private bytes_in_sequence: number;
   private temp_buffs: Record<2 | 3 | 4 | number, Uint8Array>;
@@ -71,11 +82,11 @@ export default class JSONStreamParser {
   private decoder = new TextDecoder();
 
   constructor() {
-    this.tState = C.START;
+    this.tState = TokenizerState.START;
     this.value = undefined;
 
     this.string = undefined; // string data
-    this.stringBuffer = new Uint8Array(C.STRING_BUFFER_SIZE);
+    this.stringBuffer = new Uint8Array(STRING_BUFFER_SIZE);
     this.stringBufferOffset = 0;
     this.unicode = undefined; // unicode escapes
     this.highSurrogate = undefined;
@@ -83,30 +94,30 @@ export default class JSONStreamParser {
     this.key = undefined;
     this.mode = undefined;
     this.stack = [];
-    this.state = C.VALUE;
+    this.state = ParserState.VALUE;
     this.bytes_remaining = 0; // number of bytes remaining in multi byte utf8 char to read after split boundary
     this.bytes_in_sequence = 0; // bytes in multi byte utf8 char to read
     this.temp_buffs = { "2": new Uint8Array(2), "3": new Uint8Array(3), "4": new Uint8Array(4) }; // for rebuilding chars split before boundary is reached
 
   }
   // Slow code to string converter (only used when throwing syntax errors)
-  static toknam(code: C) {
-    var keys = Object.keys(C);
-    if (keys.includes(C[code])) {
-      return C[code];
-    }
+  static toknam(code: number) {
+    // var keys = Object.keys(C);
+    // if (keys.includes(C[code])) {
+    //   return C[code];
+    // }
     return code && ("0x" + code.toString(16));
   }
 
   onError(err: unknown) { throw err; }
 
   private charError(buffer: Uint8Array, i: number) {
-    this.tState = C.STOP;
+    this.tState = TokenizerState.STOP;
     this.onError(new Error("Unexpected " + JSON.stringify(String.fromCharCode(buffer[i])) + " at position " + i + " in state " + JSONStreamParser.toknam(this.tState)));
   }
 
   private appendStringChar(char: number) {
-    if (this.stringBufferOffset >= C.STRING_BUFFER_SIZE) {
+    if (this.stringBufferOffset >= STRING_BUFFER_SIZE) {
       this.string += this.decoder.decode(this.stringBuffer.buffer);
       this.stringBufferOffset = 0;
     }
@@ -133,7 +144,7 @@ export default class JSONStreamParser {
       size = 0;
     }
 
-    if (this.stringBufferOffset + size > C.STRING_BUFFER_SIZE) {
+    if (this.stringBufferOffset + size > STRING_BUFFER_SIZE) {
       this.string += this.decoder.decode(this.stringBuffer.slice(0, this.stringBufferOffset))
       this.stringBufferOffset = 0;
     }
@@ -146,48 +157,48 @@ export default class JSONStreamParser {
     if (typeof buffer === "string") buffer = this.encoder.encode(buffer);
     let n;
     for (let i = 0, l = buffer.length; i < l; i++) {
-      if (this.tState === C.START) {
+      if (this.tState === TokenizerState.START) {
         n = buffer[i];
 
         switch (true) {
           case n === 0x7b:
-            this.onToken(C.LEFT_BRACE, "{"); // {
+            this.onToken(ParserState.LEFT_BRACE, "{"); // {
             break;
           case n === 0x7d:
-            this.onToken(C.RIGHT_BRACE, "}"); // }
+            this.onToken(ParserState.RIGHT_BRACE, "}"); // }
             break;
           case n === 0x5b:
-            this.onToken(C.LEFT_BRACKET, "["); // [
+            this.onToken(ParserState.LEFT_BRACKET, "["); // [
             break;
           case n === 0x5d:
-            this.onToken(C.RIGHT_BRACKET, "]"); // ]
+            this.onToken(ParserState.RIGHT_BRACKET, "]"); // ]
             break;
           case n === 0x3a:
-            this.onToken(C.COLON, ":");  // :
+            this.onToken(ParserState.COLON, ":");  // :
             break;
           case n === 0x2c:
-            this.onToken(C.COMMA, ","); // ,
+            this.onToken(ParserState.COMMA, ","); // ,
             break;
           case n === 0x74:
-            this.tState = C.TRUE1;  // t
+            this.tState = TokenizerState.TRUE1;  // t
             break;
           case n === 0x66:
-            this.tState = C.FALSE1;  // f
+            this.tState = TokenizerState.FALSE1;  // f
             break;
           case n === 0x6e:
-            this.tState = C.NULL1; // n
+            this.tState = TokenizerState.NULL1; // n
             break;
           case n === 0x22: // "
             this.string = "";
             this.stringBufferOffset = 0;
-            this.tState = C.STRING1;
+            this.tState = TokenizerState.STRING1;
             break;
           case n === 0x2d:
-            this.string = "-"; this.tState = C.NUMBER1; // -
+            this.string = "-"; this.tState = TokenizerState.NUMBER1; // -
             break;
           default:
             if (n >= 0x30 && n < 0x40) { // 1-9
-              this.string = String.fromCharCode(n); this.tState = C.NUMBER3;
+              this.string = String.fromCharCode(n); this.tState = TokenizerState.NUMBER3;
             } else if (n === 0x20 || n === 0x09 || n === 0x0a || n === 0x0d) {
               // whitespace
             } else {
@@ -196,7 +207,7 @@ export default class JSONStreamParser {
             break
         }
 
-      } else if (this.tState === C.STRING1) { // After open quote
+      } else if (this.tState === TokenizerState.STRING1) { // After open quote
         n = buffer[i]; // get current byte from buffer
         // check for carry over of a multi byte char split between data chunks
         // & fill temp buffer it with start of this data chunk up to the boundary limit set in the last iteration
@@ -226,48 +237,48 @@ export default class JSONStreamParser {
             i = i + this.bytes_in_sequence - 1;
           }
         } else if (n === 0x22) {
-          this.tState = C.START;
+          this.tState = TokenizerState.START;
           this.string += this.decoder.decode(this.stringBuffer.slice(0, this.stringBufferOffset));
           this.stringBufferOffset = 0;
-          this.onToken(C.STRING, this.string);
+          this.onToken(ParserState.STRING, this.string);
           this.string = undefined;
         }
         else if (n === 0x5c) {
-          this.tState = C.STRING2;
+          this.tState = TokenizerState.STRING2;
         }
         else if (n >= 0x20) { this.appendStringChar(n); }
         else {
           return this.charError(buffer, i);
         }
-      } else if (this.tState === C.STRING2) { // After backslash
+      } else if (this.tState === TokenizerState.STRING2) { // After backslash
         n = buffer[i];
         if (n === 0x22) {
-          this.appendStringChar(n); this.tState = C.STRING1;
+          this.appendStringChar(n); this.tState = TokenizerState.STRING1;
         } else if (n === 0x5c) {
-          this.appendStringChar(C.BACK_SLASH); this.tState = C.STRING1;
+          this.appendStringChar(CharacterConstant.BACK_SLASH); this.tState = TokenizerState.STRING1;
         } else if (n === 0x2f) {
-          this.appendStringChar(C.FORWARD_SLASH); this.tState = C.STRING1;
+          this.appendStringChar(CharacterConstant.FORWARD_SLASH); this.tState = TokenizerState.STRING1;
         } else if (n === 0x62) {
-          this.appendStringChar(C.BACKSPACE); this.tState = C.STRING1;
+          this.appendStringChar(CharacterConstant.BACKSPACE); this.tState = TokenizerState.STRING1;
         } else if (n === 0x66) {
-          this.appendStringChar(C.FORM_FEED); this.tState = C.STRING1;
+          this.appendStringChar(CharacterConstant.FORM_FEED); this.tState = TokenizerState.STRING1;
         } else if (n === 0x6e) {
-          this.appendStringChar(C.NEWLINE); this.tState = C.STRING1;
+          this.appendStringChar(CharacterConstant.NEWLINE); this.tState = TokenizerState.STRING1;
         } else if (n === 0x72) {
-          this.appendStringChar(C.CARRIAGE_RETURN); this.tState = C.STRING1;
+          this.appendStringChar(CharacterConstant.CARRIAGE_RETURN); this.tState = TokenizerState.STRING1;
         } else if (n === 0x74) {
-          this.appendStringChar(C.TAB); this.tState = C.STRING1;
+          this.appendStringChar(CharacterConstant.TAB); this.tState = TokenizerState.STRING1;
         } else if (n === 0x75) {
-          this.unicode = ""; this.tState = C.STRING3;
+          this.unicode = ""; this.tState = TokenizerState.STRING3;
         } else {
           return this.charError(buffer, i);
         }
-      } else if ([C.STRING3, C.STRING4, C.STRING5, C.STRING6].includes(this.tState)) { // unicode hex codes
+      } else if (TokenizerState.STRING3 >= this.tState && this.state <= TokenizerState.STRING6) { // unicode hex codes
         n = buffer[i];
         // 0-9 A-F a-f
         if ((n >= 0x30 && n < 0x40) || (n > 0x40 && n <= 0x46) || (n > 0x60 && n <= 0x66)) {
           this.unicode += String.fromCharCode(n);
-          if (this.tState++ === C.STRING6) {
+          if (this.tState++ === TokenizerState.STRING6) {
             var intVal = parseInt(this.unicode!, 16);
             this.unicode = undefined;
             if (this.highSurrogate !== undefined && intVal >= 0xDC00 && intVal < (0xDFFF + 1)) { //<56320,57343> - lowSurrogate
@@ -282,12 +293,12 @@ export default class JSONStreamParser {
               }
               this.appendStringBuf(Uint8Array.of(intVal));
             }
-            this.tState = C.STRING1;
+            this.tState = TokenizerState.STRING1;
           }
         } else {
           return this.charError(buffer, i);
         }
-      } else if (this.tState === C.NUMBER1 || this.tState === C.NUMBER3) {
+      } else if (this.tState === TokenizerState.NUMBER1 || this.tState === TokenizerState.NUMBER3) {
         n = buffer[i];
 
         switch (n) {
@@ -307,10 +318,10 @@ export default class JSONStreamParser {
           case 0x2b: // +
           case 0x2d: // -
             this.string += String.fromCharCode(n);
-            this.tState = C.NUMBER3;
+            this.tState = TokenizerState.NUMBER3;
             break;
           default:
-            this.tState = C.START;
+            this.tState = TokenizerState.START;
             var result = Number(this.string);
 
             if (isNaN(result)) {
@@ -319,51 +330,51 @@ export default class JSONStreamParser {
 
             if (/[0-9]+/.test(this.string!) && (result.toString() != this.string)) {
               // Long string of digits which is an ID string and not valid and/or safe JavaScript integer Number
-              this.onToken(C.STRING, this.string);
+              this.onToken(ParserState.STRING, this.string);
             } else {
-              this.onToken(C.NUMBER, result);
+              this.onToken(ParserState.NUMBER, result);
             }
 
             this.string = undefined;
             i--;
             break;
         }
-      } else if (this.tState === C.TRUE1) { // r
-        if (buffer[i] === 0x72) { this.tState = C.TRUE2; }
+      } else if (this.tState === TokenizerState.TRUE1) { // r
+        if (buffer[i] === 0x72) { this.tState = TokenizerState.TRUE2; }
         else { return this.charError(buffer, i); }
-      } else if (this.tState === C.TRUE2) { // u
-        if (buffer[i] === 0x75) { this.tState = C.TRUE3; }
+      } else if (this.tState === TokenizerState.TRUE2) { // u
+        if (buffer[i] === 0x75) { this.tState = TokenizerState.TRUE3; }
         else { return this.charError(buffer, i); }
-      } else if (this.tState === C.TRUE3) { // e
-        if (buffer[i] === 0x65) { this.tState = C.START; this.onToken(C.TRUE, true); }
+      } else if (this.tState === TokenizerState.TRUE3) { // e
+        if (buffer[i] === 0x65) { this.tState = TokenizerState.START; this.onToken(ParserState.TRUE, true); }
         else { return this.charError(buffer, i); }
-      } else if (this.tState === C.FALSE1) { // a
-        if (buffer[i] === 0x61) { this.tState = C.FALSE2; }
+      } else if (this.tState === TokenizerState.FALSE1) { // a
+        if (buffer[i] === 0x61) { this.tState = TokenizerState.FALSE2; }
         else { return this.charError(buffer, i); }
-      } else if (this.tState === C.FALSE2) { // l
-        if (buffer[i] === 0x6c) { this.tState = C.FALSE3; }
+      } else if (this.tState === TokenizerState.FALSE2) { // l
+        if (buffer[i] === 0x6c) { this.tState = TokenizerState.FALSE3; }
         else { return this.charError(buffer, i); }
-      } else if (this.tState === C.FALSE3) { // s
-        if (buffer[i] === 0x73) { this.tState = C.FALSE4; }
+      } else if (this.tState === TokenizerState.FALSE3) { // s
+        if (buffer[i] === 0x73) { this.tState = TokenizerState.FALSE4; }
         else { return this.charError(buffer, i); }
-      } else if (this.tState === C.FALSE4) { // e
-        if (buffer[i] === 0x65) { this.tState = C.START; this.onToken(C.FALSE, false); }
+      } else if (this.tState === TokenizerState.FALSE4) { // e
+        if (buffer[i] === 0x65) { this.tState = TokenizerState.START; this.onToken(ParserState.FALSE, false); }
         else { return this.charError(buffer, i); }
-      } else if (this.tState === C.NULL1) { // u
-        if (buffer[i] === 0x75) { this.tState = C.NULL2; }
+      } else if (this.tState === TokenizerState.NULL1) { // u
+        if (buffer[i] === 0x75) { this.tState = TokenizerState.NULL2; }
         else { return this.charError(buffer, i); }
-      } else if (this.tState === C.NULL2) { // l
-        if (buffer[i] === 0x6c) { this.tState = C.NULL3; }
+      } else if (this.tState === TokenizerState.NULL2) { // l
+        if (buffer[i] === 0x6c) { this.tState = TokenizerState.NULL3; }
         else { return this.charError(buffer, i); }
-      } else if (this.tState === C.NULL3) { // l
-        if (buffer[i] === 0x6c) { this.tState = C.START; this.onToken(C.NULL, null); }
+      } else if (this.tState === TokenizerState.NULL3) { // l
+        if (buffer[i] === 0x6c) { this.tState = TokenizerState.START; this.onToken(ParserState.NULL, null); }
         else { return this.charError(buffer, i); }
       }
     }
   }
 
-  private parseError(token: C, value: unknown) {
-    this.tState = C.STOP;
+  private parseError(token: number, value: unknown) {
+    this.tState = TokenizerState.STOP;
     this.onError(new Error("Unexpected " + JSONStreamParser.toknam(token) + (value ? ("(" + JSON.stringify(value) + ")") : "") + " in state " + JSONStreamParser.toknam(this.state)));
   }
 
@@ -377,29 +388,29 @@ export default class JSONStreamParser {
     this.value = parent.value;
     this.key = parent.key;
     this.mode = parent.mode;
-    this.emit(value);
-    if (!this.mode) { this.state = C.VALUE; }
+    this.emit(value, [parent]);
+    if (!this.mode) { this.state = ParserState.VALUE; }
   }
 
-  private emit(value: unknown) {
-    if (this.mode) { this.state = C.COMMA; }
-    this.onValue(value);
+  private emit(value: unknown, stack: Stack[] = []) {
+    if (this.mode) { this.state = ParserState.COMMA; }
+    this.onValue(value, [...this.stack, ...stack]);
   }
 
-  onValue(value: unknown) {
+  onValue(value: unknown, stack: Stack[]) {
     // Override me
   }
 
-  private onToken(token: C, value: unknown) {
-    if (this.state === C.VALUE) {
+  private onToken(token: ParserState, value: unknown) {
+    if (this.state === ParserState.VALUE) {
       switch (true) {
-        case [C.STRING, C.NUMBER, C.TRUE, C.FALSE, C.NULL].includes(token):
+        case token >= ParserState.TRUE:
           if (this.value) {
             this.value[this.key!] = value;
           }
-          this.emit(value);
+          this.emit(value, [{ value: this.value, key: this.key, mode: this.mode }]);
           break;
-        case token === C.LEFT_BRACE:
+        case token === ParserState.LEFT_BRACE:
           this.push();
           if (this.value) {
             this.value = this.value[this.key!] = {};
@@ -407,10 +418,10 @@ export default class JSONStreamParser {
             this.value = {};
           }
           this.key = undefined;
-          this.state = C.KEY;
-          this.mode = C.OBJECT;
+          this.state = ParserState.KEY;
+          this.mode = ParserMode.OBJECT;
           break;
-        case token === C.LEFT_BRACKET:
+        case token === ParserState.LEFT_BRACKET:
           this.push();
           if (this.value) {
             this.value = this.value[this.key!] = [];
@@ -418,43 +429,44 @@ export default class JSONStreamParser {
             this.value = [];
           }
           this.key = 0;
-          this.mode = C.ARRAY;
-          this.state = C.VALUE;
+          this.mode = ParserMode.ARRAY;
+          this.state = ParserState.VALUE;
           break;
-        case this.mode === C.OBJECT:
-          if (this.mode === C.OBJECT) {
-            this.pop();
-          } else {
-            return this.parseError(token, value);
-          }
+        case this.mode === ParserMode.OBJECT:
+          this.pop();
+          // if (this.mode === ParserMode.OBJECT) {
+          // } else {
+          //   return this.parseError(token, value);
+          // }
           break;
-        case this.mode === C.ARRAY:
-          if (this.mode === C.ARRAY) {
-            this.pop();
-          } else {
-            return this.parseError(token, value);
-          }
+        case this.mode === ParserMode.ARRAY:
+          this.pop();
+          // if (this.mode === ParserMode.ARRAY) {
+          // } else {
+          //   return this.parseError(token, value);
+          // }
+          break;
         default:
           return this.parseError(token, value);
       }
-    } else if (this.state === C.KEY) {
-      if (token === C.STRING) {
-        this.key = value;
-        this.state = C.COLON;
-      } else if (token === C.RIGHT_BRACE) {
+    } else if (this.state === ParserState.KEY) {
+      if (token === ParserState.STRING) {
+        this.key = value as any;
+        this.state = ParserState.COLON;
+      } else if (token === ParserState.RIGHT_BRACE) {
         this.pop();
       } else {
         return this.parseError(token, value);
       }
-    } else if (this.state === C.COLON) {
-      if (token === C.COLON) { this.state = C.VALUE; }
+    } else if (this.state === ParserState.COLON) {
+      if (token === ParserState.COLON) { this.state = ParserState.VALUE; }
       else { return this.parseError(token, value); }
-    } else if (this.state === C.COMMA) {
-      if (token === C.COMMA) {
-        if (this.mode === C.ARRAY) { this.key++; this.state = C.VALUE; }
-        else if (this.mode === C.OBJECT) { this.state = C.KEY; }
+    } else if (this.state === ParserState.COMMA) {
+      if (token === ParserState.COMMA) {
+        if (this.mode === ParserMode.ARRAY) { (this.key as number)++; this.state = ParserState.VALUE; }
+        else if (this.mode === ParserMode.OBJECT) { this.state = ParserState.KEY; }
 
-      } else if (token === C.RIGHT_BRACKET && this.mode === C.ARRAY || token === C.RIGHT_BRACE && this.mode === C.OBJECT) {
+      } else if (token === ParserState.RIGHT_BRACKET && this.mode === ParserMode.ARRAY || token === ParserState.RIGHT_BRACE && this.mode === ParserMode.OBJECT) {
         this.pop();
       } else {
         return this.parseError(token, value);
@@ -463,25 +475,4 @@ export default class JSONStreamParser {
       return this.parseError(token, value);
     }
   }
-}
-
-
-export class JsonTransformStream extends TransformStream {
-    private parser: JSONStreamParser;
-    constructor() {
-      super({
-        start: (controller) => {
-          this.parser.onValue = (val) => {
-            if (typeof val === "object" && !Array.isArray(val)) {
-              controller.enqueue(val);
-            }
-          }
-        },
-        transform: async (chunk) => {
-          chunk = await chunk;
-          this.parser.write(chunk);
-        }
-      });
-      this.parser = new JSONStreamParser();
-    }
 }
